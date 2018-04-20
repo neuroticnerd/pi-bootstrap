@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+
+
+# setup error trapping
+set -o errexit
+function error_on_line {
+    echo "Error occurred on line $1"
+    if [ $NEED_POP ]; then
+      popd
+    fi
+    exit 1
+}
+trap 'error_on_line $LINENO' ERR
+
+
+PROGRAM_NAME="${0}"
+# USAGE helper
+function usage() {
+    cat <<-END
+usage: ${PROGRAM_NAME} [options] APP [ANSIBLE_ARGS]
+
+This script deploys apps onto neuroticnerd.com
+
+OPTIONS:
+    -h      display the command help text
+    -a      skip performing apt-get operations
+    -f      skip configuring fstab and swap
+    -l      specify logfile for additional information
+    -y      unattended; avoid needing user interaction
+    -r      enable reboot of the device after running
+END
+
+    # echo -n "stuff things"
+
+    if [[ $# -ne 0 ]]; then
+        exit $1
+    else
+        exit 0
+    fi
+}
+
+LOGFILE="/tmp/pi-bootstrap.log"
+SKIP_DPKG=0
+UNATTENDED=0
+# UPDATE_ALL=1
+REBOOT_NOW=0
+REBOOT_REQUIRED=0
+# https://sookocheff.com/post/bash/parsing-bash-script-arguments-with-shopts/
+while getopts ":hafl:yr" opt; do
+    case ${opt} in
+    h)
+        usage
+        ;;
+    a)
+        SKIP_DPKG=1
+        ;;
+    f)
+        SKIP_FSTAB=1
+        ;;
+    l)
+        LOGFILE="${OPTARG}"
+        ;;
+    y)
+        UNATTENDED=1
+        ;;
+    r)
+        REBOOT_NOW=1
+        ;;
+    \?)
+        echo "Unknown option: ${OPTARG}" 1>&2
+        echo "" 1>&2
+        usage 42
+        ;;
+    :)
+        echo "Invalid option: ${OPTARG} requires an argument" 1>&2
+        echo "" 1>&2
+        usage 42
+        ;;
+    esac
+done
+shift "$((OPTIND - 1))"
+
+
+# ANSI colors you can use
+black='\033[0;30m'
+white='\033[0;37m'
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+blue='\033[0;34m'
+magenta='\033[0;35m'
+cyan='\033[0;36m'
+reset=$(tput sgr0)
+
+### confirmation function
+function confirm() {
+    #read -r -p "Are you sure? [y/N] " response
+    #case $response in
+    #    [yY][eE][sS]|[yY])
+    #        do_something
+    #        ;;
+    #    *)
+    #        do_something_else
+    #        ;;
+    #esac
+    # $1 variable to store the boolean result in
+    # $2 (optional) message to display
+    local __globalvarname="$1"
+    shift
+    if [ -z "$1" ]; then
+        local __message="Are you sure? [y/N] "
+    else
+        local __message="$1 "
+    fi
+    local __confirmresponse
+    read -r -p "$__message" __confirmresponse
+    if [[ $__confirmresponse =~ ^([yY][eE][sS]|[yY])$ ]]
+    then
+        eval $__globalvarname=true
+    else
+        eval $__globalvarname=false
+    fi
+}
+
+# set colored text to global var
+function ctext() {
+    local  __globalvarname="$3"
+    local  ctextresult="${1}${2}${reset}"
+    eval $__globalvarname="'$ctextresult'"
+    return
+}
+
+# extended echo
+ECHO_PREFIX=""
+ECHO_PREFIX_COLOR=$cyan
+function xecho() {
+    ctext $ECHO_PREFIX_COLOR "[${ECHO_PREFIX}]" prefix
+    if [ -z "$2" ]; then
+        message="$1"
+    else
+        ctext $1 $2 message
+    fi
+    echo -e "${prefix} ${message}"
+}
+
+ECHO_PREFIX="bootstrap"
+ctext $blue "\n###############################################################################\n" bootstrap_lbreak
+
+
+echo -e "${bootstrap_lbreak}"
+xecho "setting up raspberry pi..."
+echo "" > ${LOGFILE}
+
+# updates and upgrades need sudo
+sudo -v -p "Some commands require sudo access, please enter admin password: "
+
+
+GHURL="https://raw.githubusercontent.com/neuroticnerd/pi-bootstrap/master"
+DL_STATUS=0
+function ghget() {
+    # curl may not be available by default
+    wget -O $1 $GHURL/$2 >> ${LOGFILE} 2>&1 || DL_STATUS=$?
+}
+
+
+function apt_update_upgrade() {
+    ECHO_PREFIX="apt-get"
+
+    if [[ ${SKIP_DPKG} -eq 1 ]]; then
+        xecho "skipped apt-get update/upgrade"
+    else
+        xecho "performing apt-get update..."
+        sudo apt-get update -y
+
+        xecho "performing apt-get dist-upgrade..."
+        sudo apt-get dist-upgrade -y
+
+        xecho "performing rpi-update..."
+        sudo rpi-update
+    fi
+}
+
+
+
+function minimize_sd_card_wear() {
+    # http://ideaheap.com/2013/07/stopping-sd-card-corruption-on-a-raspberry-pi/
+    # https://raspberrypi.stackexchange.com/questions/169/how-can-i-extend-the-life-of-my-sd-card
+    # https://www.raspberrypi.org/forums/viewtopic.php?f=29&t=20505
+    # https://raspberrypi.stackexchange.com/questions/70/how-to-set-up-swap-space/1605#1605
+    # TODO: https://packages.debian.org/search?keywords=unburden-home-dir
+    ECHO_PREFIX="sd-card"
+
+    if [[ ${SKIP_FSTAB} -eq 1 ]]; then
+        xecho "skipped configuring fstab and swap."
+    else
+        # disable swap memory
+        if [ -f '/etc/dphys-swapfile' ]; then
+            xecho "disabling swapfile..."
+            sudo swapoff --all
+            sudo dphys-swapfile swapoff || true
+            sudo apt-get remove -y dphys-swapfile
+
+            if [ -f '/var/swap' ]; then
+                xecho "removing existing swapfile..."
+                sudo rm '/var/swap'
+            else
+                xecho "no existing swapfile found."
+            fi
+        else
+            xecho "${yellow}WARNING:${reset} unknown swapfile config; cannot disable swapfile"
+        fi
+
+        # TODO: is it worth it to disable journaling?
+
+        # make a backup of the original fstab, but don't overwrite that backup
+        sudo cp --no-clobber /etc/fstab /etc/fstab.bak
+        if [ ! -f '/etc/fstab.bak' ]; then
+            xecho "${red}ERROR:${reset} no fstab backup created!"
+            exit 42
+        fi
+
+        # file IO and string manipulation are rather painful in a
+        # shell script, but super easy in Python
+        fstab_script='configure_fstab.py'
+        if [[ ${UPDATE_ALL} -eq 1 ]]; then
+            # ensure we have the latest fstab config script
+            ghget "${fstab_script}" "${fstab_script}"
+            if [[ ${DL_STATUS} -ne 0 ]]; then
+                xecho "${red}ERROR:${reset} unable to fetch fstab configuration script"
+                exit 42
+            fi
+        else
+            if [ ! -f "${fstab_script}" ]; then
+                xecho "${yellow}WARNING:${reset} fstab config script is missing"
+            else
+                xecho "${yellow}WARNING:${reset} fstab script may not be up to date"
+            fi
+        fi
+        fstab='/etc/fstab'
+        if [ -f "${fstab_script}" ]; then
+            # ensure fstab is properly configured with tmpfs for frequent writes
+            sudo python3 configure_fstab.py "${fstab}"
+            REBOOT_REQUIRED=1
+        else
+            xecho "skiped fstab setup; config script missing"
+        fi
+    fi
+}
+
+
+function configure_unattended_upgrades() {
+    # https://blog.dantup.com/2016/04/setting-up-automatic-updates-on-raspberry-pi-raspbian-jessie/
+    # https://raspberrypi.stackexchange.com/questions/38931/how-do-i-set-my-raspberry-pi-to-automatically-update-upgrade
+    if [ ! -f '/etc/apt/apt.conf.d/50unattended-upgrades' ]; then
+        REBOOT_REQUIRED=1
+    fi
+    if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
+        REBOOT_REQUIRED=1
+    fi
+
+    sudo apt-get install -y unattended-upgrades
+
+    # enable jessie and stable origins
+    sudo sed -i 's/^\/\/      "o=Raspbian,n=jessie"/      "o=Raspbian,n=jessie"/g' /etc/apt/apt.conf.d/50unattended-upgrades
+    sudo sed -i 's/^\/\/      "o=Raspbian,a=stable"/      "o=Raspbian,a=stable"/g' /etc/apt/apt.conf.d/50unattended-upgrades
+
+    # auto reboot and set time
+    sudo sed -i 's/^\/\/Unattended-Upgrade::Automatic-Reboot "false";/Unattended-Upgrade::Automatic-Reboot "true";/g' /etc/apt/apt.conf.d/50unattended-upgrades
+    sudo sed -i 's/^\/\/Unattended-Upgrade::Automatic-Reboot-Time "02:00";/Unattended-Upgrade::Automatic-Reboot-Time "02:00";/g' /etc/apt/apt.conf.d/50unattended-upgrades
+
+    # autoremove unused packages
+    sudo sed -i 's/^\/\/Unattended-Upgrade::Remove-Unused-Dependencies "false";/Unattended-Upgrade::Remove-Unused-Dependencies "true";/g' /etc/apt/apt.conf.d/50unattended-upgrades
+
+    # dpkg configure unattended upgrades
+    sudo dpkg-reconfigure --priority low unattended-upgrades
+}
+function enable_auto_upgrades() {
+    ECHO_PREFIX="unattended-upgrades"
+
+    xecho "enabling auto upgrades..."
+    configure_unattended_upgrades
+    if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
+        xecho "repairing installed unattended-upgrades..."
+        sudo apt-get remove -y unattended-upgrades
+        sudo apt-get purge -y unattended-upgrades
+        configure_unattended_upgrades
+    fi
+    if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
+        xecho "${red}ERROR:${reset} unable to configure unattended-upgrades!"
+        exit 42
+    fi
+}
+
+
+function harden_ssh() {
+    ECHO_PREFIX="ssh"
+
+    xecho "configuring ssh..."
+    # disable password login (confirm)
+    # create .ssh directory
+    # create authorized_keys
+    # generate their own ssh key
+}
+
+
+function enable_nopw_sudo() {
+    ECHO_PREFIX="sudo"
+
+    xecho "configuring sudo access..."
+}
+
+
+function bootstrap_cleanup() {
+    ECHO_PREFIX="cleanup"
+    xecho "cleaning apt cache..."
+    sudo apt-get autoremove -y
+    sudo apt-get clean -y
+}
+
+
+apt_update_upgrade
+minimize_sd_card_wear
+enable_auto_upgrades
+harden_ssh
+enable_nopw_sudo
+bootstrap_cleanup
+
+ECHO_PREFIX='bootstrap'
+xecho "done."
+echo -e "${bootstrap_lbreak}"
+
+if [[ ${REBOOT_NOW} -eq 1 ]]; then
+    if [[ ${REBOOT_REQUIRED} -eq 1 ]]; then
+        # TODO: add confirmation for reboot
+        xecho "rebooting pi..."
+        sudo reboot
+    fi
+fi
