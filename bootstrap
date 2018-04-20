@@ -42,7 +42,7 @@ END
 LOGFILE="/tmp/pi-bootstrap.log"
 SKIP_DPKG=0
 UNATTENDED=0
-# UPDATE_ALL=1
+ALLOW_DOWNLOADS=1
 REBOOT_NOW=0
 REBOOT_REQUIRED=0
 # https://sookocheff.com/post/bash/parsing-bash-script-arguments-with-shopts/
@@ -222,7 +222,7 @@ function minimize_sd_card_wear() {
         # file IO and string manipulation are rather painful in a
         # shell script, but super easy in Python
         fstab_script='configure_fstab.py'
-        if [[ ${UPDATE_ALL} -eq 1 ]]; then
+        if [[ ${ALLOW_DOWNLOADS} -eq 1 ]]; then
             # ensure we have the latest fstab config script
             ghget "${fstab_script}" "${fstab_script}"
             if [[ ${DL_STATUS} -ne 0 ]]; then
