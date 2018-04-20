@@ -17,9 +17,9 @@ PROGRAM_NAME="${0}"
 # USAGE helper
 function usage() {
     cat <<-END
-usage: ${PROGRAM_NAME} [options] APP [ANSIBLE_ARGS]
+usage: ${PROGRAM_NAME} [options]
 
-This script deploys apps onto neuroticnerd.com
+This script executes basic config and security setup for a Raspberry Pi
 
 OPTIONS:
     -h      display the command help text
@@ -29,8 +29,6 @@ OPTIONS:
     -y      unattended; avoid needing user interaction
     -r      enable reboot of the device after running
 END
-
-    # echo -n "stuff things"
 
     if [[ $# -ne 0 ]]; then
         exit $1
