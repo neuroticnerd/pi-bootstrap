@@ -59,7 +59,7 @@ def configure_fstab(fstabpath):
         # TODO: verify that all of the mount options are correct
         '/boot': OrderedDict([
             ('skip', False),
-            ('options', 'defaults,ro,noatime,commit=60'),
+            ('options', 'defaults,noatime,ro'),
         ]),
         '/': OrderedDict([
             ('skip', False),
