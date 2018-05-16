@@ -51,7 +51,7 @@ def configure_fstab(fstabpath):
         '/boot',
         '/',
         '/tmp',
-        '/var/run',
+        # '/var/run',
         '/var/log',
         '/var/cache/apt/archives',
     ]
@@ -84,15 +84,15 @@ def configure_fstab(fstabpath):
         #     ('dump', '0'),
         #     ('pass', '0'),
         # ]),
-        '/var/run': OrderedDict([
-            ('skip', False),
-            ('device', 'tmpfs'),
-            ('mount_point', '/var/run'),
-            ('fs_type', 'tmpfs'),
-            ('options', 'defaults,noatime,nosuid,size=2M,mode=0777'),
-            ('dump', '0'),
-            ('pass', '0'),
-        ]),
+        # '/var/run': OrderedDict([
+        #     ('skip', False),
+        #     ('device', 'tmpfs'),
+        #     ('mount_point', '/var/run'),
+        #     ('fs_type', 'tmpfs'),
+        #     ('options', 'defaults,noatime,nosuid,size=2M,mode=0777'),
+        #     ('dump', '0'),
+        #     ('pass', '0'),
+        # ]),
         '/var/log': OrderedDict([
             ('skip', False),
             ('device', 'tmpfs'),

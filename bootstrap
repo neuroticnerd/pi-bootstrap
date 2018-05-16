@@ -318,9 +318,13 @@ function bootstrap_cleanup() {
 
 apt_update_upgrade
 minimize_sd_card_wear
+# copy base logfiles over?
 enable_auto_upgrades
 harden_ssh
 enable_nopw_sudo
+# passwordless_login
+# no_autolaunch_gui
+# update system boot and login messages
 bootstrap_cleanup
 
 ECHO_PREFIX='bootstrap'
