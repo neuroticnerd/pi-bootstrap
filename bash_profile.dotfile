@@ -1,0 +1,59 @@
+# overrides .profile and .bashrc
+if [ -f ~/.bashrc ]; then source ~/.bashrc; fi
+
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+if [ -d "$HOME/bin" ]; then
+    export PATH="$HOME/bin:$PATH"
+fi
+
+export WORKON_HOME="$HOME/.envs"
+export PROJECT_HOME="$HOME/.projects"
+export VIRTUALENVWRAPPER_PYTHON="$(which python3)"
+source /usr/local/bin/virtualenvwrapper.sh
+
+function twitch() {
+    if [ $# -eq 0 ]; then
+        livestreamer -np "omxplayer --adev hdmi" twitch.tv/cohhcarnage 1080p60
+    elif [ $# -eq 1 ]; then
+        livestreamer -np "omxplayer --adev hdmi" twitch.tv/$1 best
+    else
+        livestreamer -np "omxplayer --adev hdmi" twitch.tv/$1 $2
+    fi
+}
+
+function fscheck() {
+    SORT_MEM_SIZE=1000000;
+    if [ $# -eq 0 ]; then
+        DISK_LOCATION='/';
+        HEAD_COUNT=10
+    elif [ $# -eq 1 ]; then
+        DISK_LOCATION="$1";
+        HEAD_COUNT=10
+    elif [ $# -eq 2 ]; then
+        DISK_LOCATION="$1";
+        HEAD_COUNT=$2;
+        if [ ${HEAD_COUNT} -eq '0' ]; then
+            HEAD_COUNT=
+        fi
+    fi
+    df -h;
+    echo "calculating largest disk locations..."
+    if [ -z ${HEAD_COUNT:+x} ]; then
+        sudo du -ka "${DISK_LOCATION}" | sort -n -r -S $SORT_MEM_SIZE | cat;
+    else
+        sudo du -ka "${DISK_LOCATION}" | sort -n -r -S $SORT_MEM_SIZE | head -n $HEAD_COUNT;
+    fi
+}
+
+function fsclean() {
+    echo "deleting old system logfiles..."
+    sudo rm /var/log/*.gz || echo "no gzipped logs to remove"
+    sudo rm /var/log/*.1 || echo "no archived logs to remove"
+    echo "truncating system logfiles..."
+    sudo truncate -s 0 /var/log/syslog /var/log/kern.log /var/log/messages
+    echo "done."
+}
+
+function lsblkall() {
+    sudo lsblk -o NAME,TYPE,SIZE,MOUNTPOINT,PARTLABEL,PARTUUID,FSTYPE,LABEL,UUID
+}

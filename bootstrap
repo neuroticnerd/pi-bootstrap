@@ -23,10 +23,12 @@ This script executes basic config and security setup for a Raspberry Pi
 
 OPTIONS:
     -h      display the command help text
+    -d      allow script to download other files
     -a      skip performing apt-get operations
     -f      skip configuring fstab and swap
+    -u      skip unattended-upgrades setup
     -l      specify logfile for additional information
-    -y      unattended; avoid needing user interaction
+    -y      non-interactive as possible
     -r      enable reboot of the device after running
 END
 
@@ -37,17 +39,24 @@ END
     fi
 }
 
+# RASPI_DISTRO='jessie'
+RASPI_DISTRO='stretch'
+
 LOGFILE="/tmp/pi-bootstrap.log"
 SKIP_DPKG=0
-UNATTENDED=0
-ALLOW_DOWNLOADS=1
+NON_INTERACTIVE=0
+UNATTENDED_UPGRADES=0
+ALLOW_DOWNLOADS=0
 REBOOT_NOW=0
 REBOOT_REQUIRED=0
 # https://sookocheff.com/post/bash/parsing-bash-script-arguments-with-shopts/
-while getopts ":hafl:yr" opt; do
+while getopts ":hdaful:yr" opt; do
     case ${opt} in
     h)
         usage
+        ;;
+    d)
+        ALLOW_DOWNLOADS=1
         ;;
     a)
         SKIP_DPKG=1
@@ -55,11 +64,14 @@ while getopts ":hafl:yr" opt; do
     f)
         SKIP_FSTAB=1
         ;;
+    u)
+        UNATTENDED_UPGRADES=1
+        ;;
     l)
         LOGFILE="${OPTARG}"
         ;;
     y)
-        UNATTENDED=1
+        NON_INTERACTIVE=1
         ;;
     r)
         REBOOT_NOW=1
@@ -170,14 +182,16 @@ function apt_update_upgrade() {
         xecho "performing apt-get update..."
         sudo apt-get update -y
 
-        xecho "performing apt-get dist-upgrade..."
-        sudo apt-get dist-upgrade -y
+        xecho "performing apt-get upgrade..."
+        sudo apt-get upgrade -y
+
+        # xecho "performing apt-get dist-upgrade..."
+        # sudo apt-get dist-upgrade -y
 
         xecho "performing rpi-update..."
         sudo rpi-update
     fi
 }
-
 
 
 function minimize_sd_card_wear() {
@@ -258,8 +272,8 @@ function configure_unattended_upgrades() {
 
     sudo apt-get install -y unattended-upgrades
 
-    # enable jessie and stable origins
-    sudo sed -i 's/^\/\/      "o=Raspbian,n=jessie"/      "o=Raspbian,n=jessie"/g' /etc/apt/apt.conf.d/50unattended-upgrades
+    # enable distro and stable origins
+    sudo sed -i 's/^\/\/      "o=Raspbian,n=stretch"/      "o=Raspbian,n=stretch"/g' /etc/apt/apt.conf.d/50unattended-upgrades
     sudo sed -i 's/^\/\/      "o=Raspbian,a=stable"/      "o=Raspbian,a=stable"/g' /etc/apt/apt.conf.d/50unattended-upgrades
 
     # auto reboot and set time
@@ -275,17 +289,21 @@ function configure_unattended_upgrades() {
 function enable_auto_upgrades() {
     ECHO_PREFIX="unattended-upgrades"
 
-    xecho "enabling auto upgrades..."
-    configure_unattended_upgrades
-    if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
-        xecho "repairing installed unattended-upgrades..."
-        sudo apt-get remove -y unattended-upgrades
-        sudo apt-get purge -y unattended-upgrades
+    if [[ ${UNATTENDED_UPGRADES} -eq 1 ]]; then
+        xecho "skipped configuring unattended-upgrades."
+    else
+        xecho "enabling auto upgrades..."
         configure_unattended_upgrades
-    fi
-    if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
-        xecho "${red}ERROR:${reset} unable to configure unattended-upgrades!"
-        exit 42
+        if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
+            xecho "repairing installed unattended-upgrades..."
+            sudo apt-get remove -y unattended-upgrades
+            sudo apt-get purge -y unattended-upgrades
+            configure_unattended_upgrades
+        fi
+        if [ ! -f '/etc/apt/apt.conf.d/20auto-upgrades' ]; then
+            xecho "${red}ERROR:${reset} unable to configure unattended-upgrades!"
+            exit 42
+        fi
     fi
 }
 
@@ -301,10 +319,214 @@ function harden_ssh() {
 }
 
 
+function setup_dev_user_group() {
+    ECHO_PREFIX='group-dev'
+
+    xecho "setting up dev user group..."
+    sudo groupadd dev || true
+    sudo usermod -a -G dev root
+    sudo usermod -a -G dev pi
+    sudo chown -R root:dev /opt
+    sudo chmod -R 774 /opt
+}
+
+
 function enable_nopw_sudo() {
     ECHO_PREFIX="sudo"
 
     xecho "configuring sudo access..."
+}
+
+
+function preinstall_system_packages() {
+    ECHO_PREFIX='apt-get'
+    xecho "installing core system packages..."
+    aptpackages=(
+        rsyslog
+        python
+        python3
+        python3-pip
+        python3-dev
+        build-essential
+        cmake
+        pkg-config
+        fail2ban
+    );
+    sudo apt-get install -y ${aptpackages[@]}
+}
+
+
+function preinstall_python_packages() {
+    ECHO_PREFIX='python3'
+
+    sudo pip install --upgrade --upgrade-strategy eager pip
+    sudo pip3 install --upgrade --upgrade-strategy eager pip
+
+    pypackages=(
+        pip
+        setuptools
+        wheel
+        virtualenvwrapper
+        virtualenv
+        ansible
+    );
+    # sudo pip3 install --upgrade --no-cache-dir ${pypackages[@]}
+    sudo pip3 install --upgrade --upgrade-strategy eager ${pypackages[@]}
+    # sudo pip3 install --upgrade pip setuptools livestreamer requests virtualenvwrapper virtualenv
+}
+
+
+function setup_dev_virtualenv() {
+    ECHO_PREFIX='virtualenv-dev'
+    pypackages=(
+        pip
+        setuptools
+        wheel
+        virtualenvwrapper
+        virtualenv
+        livestreamer
+        requests
+        pyopenssl
+        ndg-httpsclient
+        pyasn1
+        sqlalchemy
+        markdown
+        Jinja2
+        beautifulsoup4
+        lxml
+        Pillow
+        Pygments
+        ansible
+        pandas
+        numpy
+        matplotlib
+        scikit-learn
+        'fuzzywuzzy[speedup]'
+    );
+    # sudo pip3 install --upgrade --upgrade-strategy eager --no-cache-dir ${pypackages[@]}
+    sudo pip3 install --upgrade --upgrade-strategy eager ${pypackages[@]}
+}
+
+
+function setup_twitch_virtualenv() {
+    ECHO_PREFIX='virtualenv-dev'
+    pypackages=(
+        pip
+        setuptools
+        wheel
+        livestreamer
+        requests
+    );
+    sudo pip3 install --upgrade --upgrade-strategy eager --no-cache-dir ${pypackages[@]}
+}
+
+
+function stretch_install_ffmpeg() {
+    # NOTE: available from repo on stretch, but not latest
+    ECHO_PREFIX='ffmpeg'
+}
+
+
+function stretch_install_motion() {
+    # TODO: figure out motion install for Stretch
+    ECHO_PREFIX='motion'
+}
+
+
+# https://www.pyimagesearch.com/2017/09/04/raspbian-stretch-install-opencv-3-python-on-your-raspberry-pi/
+function stretch_install_opencv3() {
+    # NOTE: this only works on Stretch!
+    ECHO_PREFIX='opencv3'
+
+    MAKE_NUM_CORES=2
+    OPENCV3_VIRTUALENV='opencv3'
+    # OPENCV3_DIR='/opt/opencv3'
+    OPENCV3_DIR='/mnt/seagate1tb/opencv3'
+    OPENCV3_BUILD_DIR="${OPENCV3_DIR}/build"
+    # OPENCV3_BUILD_DIR='/mnt/seagate1tb/opencv-build'
+    OPENCV3_VERSION='3.4.1'
+    OPENCV3_ZIP="${OPENCV3_DIR}/opencv-${OPENCV3_VERSION}.zip"
+    OPENCV3_GITHUB="https://github.com/opencv/opencv/archive/${OPENCV3_VERSION}.zip"
+    OPENCV3_CONTRIB_ZIP="${OPENCV3_DIR}/opencv_contrib-${OPENCV3_VERSION}.zip"
+    OPENCV3_CONTRIB_GITHUB="https://github.com/opencv/opencv_contrib/archive/${OPENCV3_VERSION}.zip"
+    OPENCV3_SRC_DIR="${OPENCV3_DIR}/opencv-${OPENCV3_VERSION}"
+    OPENCV3_SRC_CONTRIB_DIR="${OPENCV3_DIR}/opencv_contrib-${OPENCV3_VERSION}"
+
+    xecho "OPENCV3_DIR=${OPENCV3_DIR}"
+    xecho "OPENCV3_SRC_DIR=${OPENCV3_SRC_DIR}"
+    xecho "OPENCV3_SRC_CONTRIB_DIR=${OPENCV3_SRC_CONTRIB_DIR}"
+    xecho "OPENCV3_BUILD_DIR=${OPENCV3_BUILD_DIR}"
+
+    # xecho "installing prerequisites..."
+    # sudo apt-get install -y build-essential git clang cmake make pkg-config
+
+    # xecho "installing core dependencies..."
+    # sudo apt-get install -y python2.7-dev python3-dev python-numpy
+
+    # xecho "installing image IO packages..."
+    # sudo apt-get install -y libjpeg-dev libtiff5-dev libjasper-dev libpng12-dev
+
+    # xecho "installing video IO packages..."
+    # sudo apt-get install -y libavcodec-dev libavformat-dev libswscale-dev libv4l-dev
+    # sudo apt-get install -y libxvidcore-dev libx264-dev libgstreamer-plugins-base1.0-dev
+
+    # xecho "installing GTK dependencies for highgui..."
+    # sudo apt-get install -y libgtk2.0-dev libgtk-3-dev
+
+    # xecho "installing optimization libs..."
+    # sudo apt-get install -y libatlas-base-dev gfortran
+
+    xecho "fetching OpenCV source code..."
+    sudo mkdir -p "${OPENCV3_DIR}"
+    pushd "${OPENCV3_DIR}"
+
+    if [ ! -f ${OPENCV3_ZIP} ]; then
+        sudo rm -r "${OPENCV3_SRC_DIR}" || xecho "no OpenCV src already exists"
+        sudo wget --output-document "${OPENCV3_ZIP}" "${OPENCV3_GITHUB}"
+        sudo unzip "${OPENCV3_ZIP}"
+        sudo chown -R :dev "${OPENCV3_DIR}"
+        sudo chmod -R 774 "${OPENCV3_DIR}"
+    fi
+    if [ ! -f ${OPENCV3_CONTRIB_ZIP} ]; then
+        sudo rm -r "${OPENCV3_SRC_CONTRIB_DIR}" || xecho "no OpenCV contrib src already exists"
+        sudo wget --output-document "${OPENCV3_CONTRIB_ZIP}" "${OPENCV3_CONTRIB_GITHUB}"
+        sudo unzip "${OPENCV3_CONTRIB_ZIP}"
+        sudo chown -R :dev "${OPENCV3_DIR}"
+        sudo chmod -R 774 "${OPENCV3_DIR}"
+    fi
+
+    xecho "preparing OpenCV build..."
+    # NOTE: this assumes that virtualenv and virtualenvwrapper have alread been setup
+    source "$HOME/.bash_profile"
+    workon "${OPENCV3_VIRTUALENV}" || mkvirtualenv "${OPENCV3_VIRTUALENV}" -p python3
+    python --version | grep "Python 3" || exit 42
+    echo "${VIRTUAL_ENV}" | grep "${OPENCV3_VIRTUALENV}" || exit 42
+
+    pip install --upgrade --upgrade-strategy eager numpy
+    pip freeze | grep "numpy" || exit 42
+
+    sudo rm -r "${OPENCV3_BUILD_DIR}" || xecho "no pre-existing build directory"
+    sudo mkdir -p "${OPENCV3_BUILD_DIR}"
+    sudo chown -R :dev "${OPENCV3_BUILD_DIR}"
+    sudo chmod -R 774 "${OPENCV3_BUILD_DIR}"
+    pushd "${OPENCV3_BUILD_DIR}"
+
+    OPENCV3_CMAKE_ARGS=(
+        '-D' 'CMAKE_BUILD_TYPE=RELEASE'
+        '-D' 'CMAKE_INSTALL_PREFIX=/usr/local'
+        '-D' 'BUILD_EXAMPLES=ON'
+        '-D' 'INSTALL_PYTHON_EXAMPLES=ON'
+        '-D' 'INSTALL_C_EXAMPLES=ON'
+        '-D' "OPENCV_EXTRA_MODULES_PATH=${OPENCV3_SRC_CONTRIB_DIR}/modules"
+    )
+    # TODO: figure out how to determine whether cmake completes successfully
+    cmake ${OPENCV3_CMAKE_ARGS[@]} ${OPENCV3_SRC_DIR}
+    # read -n 1 -s -r -p "Press any key to continue building OpenCV"
+    make -j $MAKE_NUM_CORES
+
+    popd
+
+    popd
 }
 
 
@@ -315,16 +537,30 @@ function bootstrap_cleanup() {
     sudo apt-get clean -y
 }
 
-
+# TODO: place dotfiles and setup streaming and motion and picamera, enable log forwarding
+# configure wireless/network connection
 apt_update_upgrade
+
 minimize_sd_card_wear
 # copy base logfiles over?
 enable_auto_upgrades
 harden_ssh
+setup_dev_user_group
 enable_nopw_sudo
 # passwordless_login
+#     sudo raspi-config nonint do_boot_behaviour B2
 # no_autolaunch_gui
 # update system boot and login messages
+# preinstall_system_packages
+
+# preinstall_python_packages
+# setup_dev_virtualenv
+# setup_twitch_virtualenv
+
+stretch_install_ffmpeg
+stretch_install_motion
+# stretch_install_opencv3
+
 bootstrap_cleanup
 
 ECHO_PREFIX='bootstrap'

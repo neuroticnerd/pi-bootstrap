@@ -46,12 +46,14 @@ def configure_fstab(fstabpath):
     max_len_pass = 1
     str_pass = '<pass_num>'
 
+    # TODO: detect and modify according to symlinks for /tmp and /run
+
     expected_mount_points = [
         '/proc',
         '/boot',
         '/',
         '/tmp',
-        # '/var/run',
+        '/run',
         '/var/log',
         '/var/cache/apt/archives',
     ]
@@ -70,29 +72,21 @@ def configure_fstab(fstabpath):
             ('device', 'tmpfs'),
             ('mount_point', '/tmp'),
             ('fs_type', 'tmpfs'),
-            ('options', 'defaults,nodev,noatime,nosuid,size=100M,mode=1777'),
+            # ('options', 'defaults,nodev,noatime,nosuid,size=200M,mode=1777'),
+            # unfortunately, things like pip can use a lot when installing packages
+            ('options', 'defaults,nodev,noatime,nosuid,mode=1777'),
             ('dump', '0'),
             ('pass', '0'),
         ]),
-        # this is meant to be more persistent, might cause issues making it tmpfs
-        # '/': OrderedDict([
-        #     ('skip', False),
-        #     ('device', 'tmpfs'),
-        #     ('mount_point', '/var/tmp'),
-        #     ('fs_type', 'tmpfs'),
-        #     ('options', 'defaults,nodev,noatime,nosuid,size=50M,mode=1777'),
-        #     ('dump', '0'),
-        #     ('pass', '0'),
-        # ]),
-        # '/var/run': OrderedDict([
-        #     ('skip', False),
-        #     ('device', 'tmpfs'),
-        #     ('mount_point', '/var/run'),
-        #     ('fs_type', 'tmpfs'),
-        #     ('options', 'defaults,noatime,nosuid,size=2M,mode=0777'),
-        #     ('dump', '0'),
-        #     ('pass', '0'),
-        # ]),
+        '/run': OrderedDict([
+            ('skip', False),
+            ('device', 'tmpfs'),
+            ('mount_point', '/run'),
+            ('fs_type', 'tmpfs'),
+            ('options', 'defaults,noatime,nosuid,size=2M,mode=0777'),
+            ('dump', '0'),
+            ('pass', '0'),
+        ]),
         '/var/log': OrderedDict([
             ('skip', False),
             ('device', 'tmpfs'),
@@ -102,10 +96,6 @@ def configure_fstab(fstabpath):
             ('dump', '0'),
             ('pass', '0'),
         ]),
-        # '/': OrderedDict([
-        #     # tmpfs  /var/log/apt  tmpfs  defaults,noatime  0  0
-        #     ('skip', False),
-        # ]),
         '/var/cache/apt/archives': OrderedDict([
             ('skip', False),
             ('device', 'tmpfs'),
@@ -146,7 +136,6 @@ def configure_fstab(fstabpath):
             line['options'] = None
             line['dump'] = None
             line['pass'] = None
-            input_lines.append(line)
 
             if not line['skip']:
                 parts = line['line'].split()
@@ -170,6 +159,13 @@ def configure_fstab(fstabpath):
                     expected_mount_points.remove(line['mount_point'])
                 except ValueError:
                     pass
+            else:
+                swap_comment_1 = 'swapfile is not a swap partition'
+                swap_comment_2 = 'dphys-swapfile swap[on|off]'
+                if swap_comment_1 in line['line'] or swap_comment_2 in line['line']:
+                    continue
+
+            input_lines.append(line)
 
     if not input_lines:
         print('ERROR: no lines read from fstab file!')

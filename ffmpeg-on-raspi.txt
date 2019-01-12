@@ -1,0 +1,29 @@
+
+installing ffmpeg on rpi
+
+gpg --keyserver pgp.mit.edu --recv-keys 7638D0442B90D010 8B48AD6246925553
+sudo gpg --armor --export 7638D0442B90D010 | sudo apt-key add -
+sudo gpg --armor --export 8B48AD6246925553 | sudo apt-key add -
+
+
+./configure --enable-gpl --disable-stripping --enable-avresample --enable-avisynth --enable-libbluray --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libmodplug --enable-libmp3lame --enable-libopenjpeg --enable-libopus --enable-libpulse --enable-librubberband --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libssh --enable-libtheora --enable-libtwolame --enable-libvorbis --enable-libvpx --enable-libwavpack --enable-libwebp --enable-libx265 --enable-libxvid --enable-libzmq --enable-libzvbi --enable-omx --enable-openal --enable-opengl --enable-sdl2 --enable-libdc1394 --enable-libopencv --enable-libx264 --enable-shared --enable-omx-rpi --enable-nonfree --enable-mmal
+
+
+# capture video with raspivid
+raspivid -o ~/picamera/testvideo.h264 -t 10000 --exposure antishake --awb auto --vflip --sharpness 0 --framerate 15 -w 1920 -h 1080
+raspivid -o ~/picamera/testvideo.h264 -t 10000 --exposure night --awb shade --vflip --hflip --sharpness 0 --framerate 30 -w 1920 -h 1080 --imxfx colourbalance
+# pull the captured video to a local file to view
+scp rpi3:/home/pi/picamera/testvideo.h264 ~/Documents/testvideo.h264
+
+# capture video with motion
+pi@raspberrypi:~/.motion $ nano motion.conf
+pi@raspberrypi:~/.motion $ motion
+# pull captured motion video into local file to view
+scp rpi3:/home/pi/.motion/video/01-20180424030328.mkv ~/Documents/motion.mkv
+
+
+https://www.raspberrypi.org/documentation/installation/installing-images/linux.md
+https://beebom.com/how-clone-raspberry-pi-sd-card-windows-linux-macos/
+https://unix.stackexchange.com/questions/271471/running-dd-why-resource-is-busy
+https://raspberrypi.stackexchange.com/questions/69914/how-to-clone-raspberry-pi-sd-card-on-windows-linux-and-macos/69918#69918
+
